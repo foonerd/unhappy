@@ -1,0 +1,5 @@
+/target
+# The binaries scripts/ship.sh builds and the zips scripts/package.sh makes
+/bin/
+/dist/
+**/*.rs.bk

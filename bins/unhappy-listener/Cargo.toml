@@ -1,0 +1,16 @@
+[package]
+name = "unhappy-listener"
+description = "Input listener for the Unhappy TriggerHappy plugin: grabs chosen remotes and runs commands on short, long, and double presses."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+evdev = "0.13"
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lints]
+workspace = true

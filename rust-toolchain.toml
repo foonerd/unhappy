@@ -1,0 +1,13 @@
+# The toolchain every build uses, on a developer's machine and in CI alike.
+# The listener ships as static musl binaries, one per Volumio architecture,
+# so no player's C library is a concern; the host's own target serves the
+# check.
+[toolchain]
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]
+targets = [
+    "x86_64-unknown-linux-musl",
+    "armv7-unknown-linux-musleabihf",
+    "arm-unknown-linux-musleabihf",
+    "aarch64-unknown-linux-musl",
+]
