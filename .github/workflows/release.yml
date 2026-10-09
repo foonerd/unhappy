@@ -1,0 +1,102 @@
+name: release
+
+# A tag builds the release: the check and the cross builds side by side in
+# Glass's builder image, then the plugin zip published as a pre-release
+# with its digest and the notes from the changelog. Run by hand it builds
+# everything and publishes nothing.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: format, lints, tests, docs
+    runs-on: ubuntu-24.04
+    container: ghcr.io/foonerd/glass-builder@sha256:1d6d085cbf23ff53628402be14e87a5ffe996416894684e596956143365800da
+    steps:
+      - uses: actions/checkout@v7
+      - name: The tag names the version the workspace carries
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          [ "$GITHUB_REF_NAME" = "v$version" ] || { echo "the tag is $GITHUB_REF_NAME, the workspace is $version" >&2; exit 1; }
+          grep -q "\"version\": \"$version\"" unhappy_triggerhappy/package.json || { echo "package.json does not carry $version" >&2; exit 1; }
+          grep -q "^## \[$version\]" CHANGELOG.md || { echo "CHANGELOG.md has no section for $version" >&2; exit 1; }
+      - run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: check
+          cache-bin: false
+          save-if: false
+      - run: scripts/check.sh
+
+  shell:
+    name: shell lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - run: shellcheck -S warning -s sh unhappy_triggerhappy/install.sh unhappy_triggerhappy/uninstall.sh get-unhappy.sh
+      - run: shellcheck -S warning scripts/*.sh
+
+  ship:
+    name: cross builds and the plugin zip
+    runs-on: ubuntu-24.04
+    container: ghcr.io/foonerd/glass-builder@sha256:1d6d085cbf23ff53628402be14e87a5ffe996416894684e596956143365800da
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ship
+          cache-bin: false
+          save-if: false
+      - run: scripts/ship.sh
+      - run: scripts/package.sh
+      - name: The zip names the commit it was built from
+        run: |
+          unzip -p dist/unhappy_triggerhappy-*.zip build.json | grep -F "\"commit\": \"$(git rev-parse --short HEAD)\""
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-plugin
+          path: dist/unhappy_triggerhappy-*.zip
+          if-no-files-found: error
+
+  publish:
+    name: publish
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [check, shell, ship]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-plugin
+          path: dist
+      - name: Every asset's digest in SHA256SUMS
+        run: |
+          (cd dist && sha256sum unhappy_triggerhappy-*.zip > SHA256SUMS && cat SHA256SUMS)
+      - name: Release notes from the changelog, with the sponsorship footer
+        run: |
+          scripts/release-notes.sh "${GITHUB_REF_NAME#v}" > dist/notes.md
+          [ -s dist/notes.md ] || echo "Unhappy TriggerHappy ${GITHUB_REF_NAME#v}" > dist/notes.md
+          printf '\n' >> dist/notes.md
+          cat .github/release-footer.md >> dist/notes.md
+      # Published as a pre-release: no player is offered it but one asked for
+      # it by version. It is made the latest by hand once it has been tried
+      # (gh release edit <tag> --prerelease=false --latest).
+      - uses: softprops/action-gh-release@v3
+        with:
+          prerelease: true
+          body_path: dist/notes.md
+          files: |
+            dist/unhappy_triggerhappy-*.zip
+            dist/SHA256SUMS
