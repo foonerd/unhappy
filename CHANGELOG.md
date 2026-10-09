@@ -2,7 +2,7 @@
 
 All notable changes to Unhappy TriggerHappy are recorded here. The format follows Keep a Changelog; versions follow Semantic Versioning.
 
-## [1.2.0] - unreleased
+## [1.2.0] - 2026-10-09
 
 - **Bindings of your own for a remote taken over.** A bindings section lists every binding as a row of key, press, and command with a remove switch, and a new-binding row at the end. Each key may carry a short, a long, and a double binding. A remote with no list of its own keeps running the editor's eight commands as short presses.
 - **Capture a key.** A button asks the listener for the next key pressed on any remote and puts its name into the new binding's key field; the page refreshes itself. While the listener waits, presses run no commands.
