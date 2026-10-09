@@ -15,6 +15,9 @@ var listenerClient = require('./listener-client');
 var LOG_PREFIX = 'Unhappy TriggerHappy: ';
 var SYSTEMCTL = '/usr/bin/sudo /bin/systemctl';
 var SERVICE = 'triggerhappy';
+var PLUGIN_TYPE = 'system_controller';
+var PLUGIN_NAME = 'unhappy_triggerhappy';
+var CAPTURE_MS = 10000;
 
 module.exports = UnhappyTriggerHappy;
 
@@ -24,6 +27,7 @@ function UnhappyTriggerHappy(context) {
     this.logger = this.context.logger;
     this._cancelPoll = null;
     this._rows = [];
+    this._capturing = false;
 }
 
 UnhappyTriggerHappy.prototype.onVolumioStart = function () {
@@ -102,6 +106,7 @@ UnhappyTriggerHappy.prototype.getUIConfig = function () {
         });
 
         self._fillListenerSection(uiconf.sections[3]);
+        self._fillBindingsSection(uiconf.sections[4]);
 
         self._listenerStatusText().then(function (text) {
             self._contentById(uiconf.sections[3], 'listener_status').value = text;
@@ -120,11 +125,7 @@ UnhappyTriggerHappy.prototype.getUIConfig = function () {
 UnhappyTriggerHappy.prototype._fillListenerSection = function (section) {
     var self = this;
     var enabled = self.config.get('listener_enabled') === true;
-    var timing = listener.timingFrom({
-        long_ms: self.config.get('long_ms'),
-        double_ms: self.config.get('double_ms'),
-        debounce_ms: self.config.get('debounce_ms')
-    });
+    var timing = self._timing();
 
     self._contentById(section, 'listener_enabled').value = enabled;
     Object.keys(timing).forEach(function (field) {
@@ -146,6 +147,69 @@ UnhappyTriggerHappy.prototype._fillListenerSection = function (section) {
     });
 };
 
+// The bindings section: one row of key, press, command, and a remove switch
+// per binding, ahead of the new-binding fields the page already holds. The
+// new row's key is the last capture.
+UnhappyTriggerHappy.prototype._fillBindingsSection = function (section) {
+    var self = this;
+    var bindings = self._bindings();
+    var rows = [];
+
+    bindings.forEach(function (binding, i) {
+        var p = 'b' + i + '_';
+        var tag = '#' + (i + 1) + ' ';
+        rows.push({
+            id: p + 'key',
+            element: 'input',
+            type: 'text',
+            label: tag + self._t('ROW_KEY'),
+            doc: self._t('ROW_KEY_DOC'),
+            value: binding.key
+        });
+        rows.push({
+            id: p + 'press',
+            element: 'select',
+            label: tag + self._t('ROW_PRESS'),
+            doc: self._t('ROW_PRESS_DOC'),
+            value: self._pressOption(binding.press),
+            options: self._pressOptions()
+        });
+        rows.push({
+            id: p + 'command',
+            element: 'input',
+            type: 'text',
+            label: tag + self._t('ROW_COMMAND'),
+            doc: self._t('ROW_COMMAND_DOC'),
+            value: binding.command
+        });
+        rows.push({
+            id: p + 'remove',
+            element: 'switch',
+            label: tag + self._t('ROW_REMOVE'),
+            doc: self._t('ROW_REMOVE_DOC'),
+            value: false
+        });
+        section.saveButton.data.push(p + 'key', p + 'press', p + 'command', p + 'remove');
+    });
+    section.content = rows.concat(section.content);
+
+    self._contentById(section, 'new_key').value = String(self.config.get('captured_key') || '');
+    self._contentById(section, 'new_press').value = self._pressOption('short');
+    self._contentById(section, 'new_press').options = self._pressOptions();
+    self._contentById(section, 'new_command').value = '';
+};
+
+UnhappyTriggerHappy.prototype._pressOption = function (press) {
+    return { value: press, label: this._t('PRESS_' + press.toUpperCase()) };
+};
+
+UnhappyTriggerHappy.prototype._pressOptions = function () {
+    var self = this;
+    return listener.PRESSES.map(function (press) {
+        return self._pressOption(press);
+    });
+};
+
 UnhappyTriggerHappy.prototype._listenerStatusText = function () {
     var self = this;
     var enabled = self.config.get('listener_enabled') === true;
@@ -158,6 +222,9 @@ UnhappyTriggerHappy.prototype._listenerStatusText = function () {
             .replace('{bindings}', String(status.bindings || 0));
         if (status.config_error) {
             text += ' (' + status.config_error + ')';
+        }
+        if (status.warnings && status.warnings.length) {
+            text += ' (' + self._t('LISTENER_DROPPED') + ' ' + status.warnings.join('. ') + ')';
         }
         return text;
     }).catch(function () {
@@ -227,7 +294,7 @@ UnhappyTriggerHappy.prototype.saveBindings = function (data) {
         }
     }, data)
         .then(function () {
-            // One map, two executors: the listener reads the same editor.
+            // A remote with no list of its own runs the editor's map.
             return self._syncListener();
         })
         .then(function () {
@@ -248,7 +315,12 @@ UnhappyTriggerHappy.prototype.saveListener = function (data) {
     var defer = libQ.defer();
     var enabled = data.listener_enabled === true;
     var timing = listener.timingFrom(data);
-    var taken = listener.takenDevices(self._rows, data);
+    // The rows as the page showed them; the same rows again when no page
+    // was rendered since the backend started.
+    var rows = self._rows.length
+        ? self._rows
+        : listener.rows(devices.list(), listener.parseStored(self.config.get('listener_devices')));
+    var taken = listener.takenDevices(rows, data);
 
     self.config.set('listener_enabled', enabled);
     Object.keys(timing).forEach(function (field) {
@@ -281,20 +353,106 @@ UnhappyTriggerHappy.prototype.saveListener = function (data) {
     return defer.promise;
 };
 
-// The listener's file from the config, and a reload when it is running.
-UnhappyTriggerHappy.prototype._syncListener = function () {
+// The bindings page saved: the list edited, rows removed, the new row added.
+UnhappyTriggerHappy.prototype.saveListenerBindings = function (data) {
     var self = this;
+    var defer = libQ.defer();
+    var result = listener.bindingsFromForm(self._bindings(), data);
+
+    if (result.errors.length) {
+        self.commandRouter.pushToastMessage('error', 'Unhappy TriggerHappy', result.errors.join('. '));
+        defer.reject(new Error(result.errors.join('; ')));
+        return defer.promise;
+    }
+
+    self.config.set('listener_bindings', JSON.stringify(result.bindings));
+    self.config.set('captured_key', '');
+
+    self._syncListener().then(function (answer) {
+        if (answer && answer.ok === false) {
+            self.commandRouter.pushToastMessage('error', 'Unhappy TriggerHappy',
+                self._t('LISTENER_REFUSED') + ' ' + answer.error);
+        } else if (answer && answer.warnings && answer.warnings.length) {
+            self.commandRouter.pushToastMessage('warning', 'Unhappy TriggerHappy',
+                self._t('LISTENER_DROPPED') + ' ' + answer.warnings.join('. '));
+        } else {
+            self.commandRouter.pushToastMessage('success', 'Unhappy TriggerHappy',
+                self._t('BINDINGS_SAVED'));
+        }
+        self._refreshUi();
+        defer.resolve();
+    }).catch(function (err) {
+        self.logger.error(LOG_PREFIX + 'save listener bindings failed: ' + err.message);
+        self.commandRouter.pushToastMessage('error', 'Unhappy TriggerHappy', err.message);
+        defer.reject(err);
+    });
+
+    return defer.promise;
+};
+
+// The wizard: the next key pressed on any remote, into the new row's key.
+UnhappyTriggerHappy.prototype.captureKey = function () {
+    var self = this;
+    var defer = libQ.defer();
 
     if (self.config.get('listener_enabled') !== true) {
-        return Promise.resolve();
+        self.commandRouter.pushToastMessage('error', 'Unhappy TriggerHappy', self._t('LISTENER_OFF'));
+        defer.resolve();
+        return defer.promise;
     }
-    self._writeListenerConfig();
-    return self._listener({ cmd: 'reload' }, 2000).catch(function (err) {
-        self.logger.warn(LOG_PREFIX + 'listener reload: ' + err.message);
+    if (self._capturing) {
+        defer.resolve();
+        return defer.promise;
+    }
+    self._capturing = true;
+    self.commandRouter.pushToastMessage('info', 'Unhappy TriggerHappy', self._t('PRESS_NOW'));
+
+    self._listener({ cmd: 'capture', timeout_ms: CAPTURE_MS }, CAPTURE_MS + 2000).then(function (answer) {
+        self._capturing = false;
+        if (!answer || answer.ok !== true) {
+            var why = answer && answer.error === 'timeout' ? self._t('CAPTURE_TIMEOUT') : String(answer && answer.error);
+            self.commandRouter.pushToastMessage('warning', 'Unhappy TriggerHappy', why);
+            defer.resolve();
+            return;
+        }
+        var device = answer.device || {};
+        var taken = listener.parseStored(self.config.get('listener_devices')).some(function (d) {
+            return d.name === device.name;
+        });
+        self.config.set('captured_key', String(answer.key));
+        self.commandRouter.pushToastMessage('success', 'Unhappy TriggerHappy',
+            self._t('CAPTURED').replace('{key}', String(answer.key)).replace('{device}', String(device.name || '?'))
+            + (taken ? '' : ' ' + self._t('CAPTURED_NOT_TAKEN')));
+        self._refreshUi();
+        defer.resolve();
+    }).catch(function (err) {
+        self._capturing = false;
+        self.logger.warn(LOG_PREFIX + 'capture: ' + err.message);
+        self.commandRouter.pushToastMessage('error', 'Unhappy TriggerHappy', self._t('LISTENER_NOT_RUNNING'));
+        defer.resolve();
+    });
+
+    return defer.promise;
+};
+
+// The settings page again, to every browser that has it open.
+UnhappyTriggerHappy.prototype._refreshUi = function () {
+    var self = this;
+
+    self.commandRouter.getUIConfigOnPlugin(PLUGIN_TYPE, PLUGIN_NAME, {}).then(function (uiconf) {
+        self.commandRouter.broadcastMessage('pushUiConfig', uiconf);
     });
 };
 
-UnhappyTriggerHappy.prototype._writeListenerConfig = function () {
+UnhappyTriggerHappy.prototype._timing = function () {
+    return listener.timingFrom({
+        long_ms: this.config.get('long_ms'),
+        double_ms: this.config.get('double_ms'),
+        debounce_ms: this.config.get('debounce_ms')
+    });
+};
+
+UnhappyTriggerHappy.prototype._uiFields = function () {
     var self = this;
     var fields = {};
 
@@ -302,14 +460,36 @@ UnhappyTriggerHappy.prototype._writeListenerConfig = function () {
         var stored = self.config.get(row.field);
         fields[row.field] = (stored === undefined || stored === null) ? row.command : stored;
     });
+    return fields;
+};
+
+// The remote's bindings: its own list, or the editor's map while it has none.
+UnhappyTriggerHappy.prototype._bindings = function () {
+    var stored = listener.parseBindings(this.config.get('listener_bindings'));
+    return stored.length ? stored : listener.seedBindings(this._uiFields());
+};
+
+// The listener's file from the config, and a reload when it is running.
+// Resolves with the listener's answer, or nothing when it is not running.
+UnhappyTriggerHappy.prototype._syncListener = function () {
+    var self = this;
+
+    if (self.config.get('listener_enabled') !== true) {
+        return Promise.resolve(null);
+    }
+    self._writeListenerConfig();
+    return self._listener({ cmd: 'reload' }, 2000).catch(function (err) {
+        self.logger.warn(LOG_PREFIX + 'listener reload: ' + err.message);
+        return null;
+    });
+};
+
+UnhappyTriggerHappy.prototype._writeListenerConfig = function () {
+    var self = this;
     var body = listener.configFor(
         listener.parseStored(self.config.get('listener_devices')),
-        {
-            long_ms: self.config.get('long_ms'),
-            double_ms: self.config.get('double_ms'),
-            debounce_ms: self.config.get('debounce_ms')
-        },
-        fields
+        self._timing(),
+        self._bindings()
     );
     var file = path.join(self._configDir, listener.CONFIG_BASENAME);
 

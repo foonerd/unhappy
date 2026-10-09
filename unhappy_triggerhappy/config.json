@@ -58,5 +58,13 @@
   "debounce_ms": {
     "type": "number",
     "value": 30
+  },
+  "listener_bindings": {
+    "type": "string",
+    "value": "[]"
+  },
+  "captured_key": {
+    "type": "string",
+    "value": ""
   }
 }

@@ -254,6 +254,70 @@
           }
         }
       ]
+    },
+    {
+      "id": "section_bindings",
+      "element": "section",
+      "label": "TRANSLATE.BINDINGS_SECTION",
+      "icon": "fa-list",
+      "onSave": {
+        "type": "controller",
+        "endpoint": "system_controller/unhappy_triggerhappy",
+        "method": "saveListenerBindings"
+      },
+      "saveButton": {
+        "label": "TRANSLATE.SAVE",
+        "data": [
+          "new_key",
+          "new_press",
+          "new_command"
+        ]
+      },
+      "content": [
+        {
+          "id": "capture_key",
+          "element": "button",
+          "label": "TRANSLATE.CAPTURE_KEY",
+          "doc": "TRANSLATE.CAPTURE_KEY_DOC",
+          "onClick": {
+            "type": "emit",
+            "message": "callMethod",
+            "data": {
+              "endpoint": "system_controller/unhappy_triggerhappy",
+              "method": "captureKey",
+              "data": ""
+            }
+          }
+        },
+        {
+          "id": "new_key",
+          "element": "input",
+          "type": "text",
+          "label": "TRANSLATE.NEW_KEY",
+          "doc": "TRANSLATE.NEW_KEY_DOC",
+          "value": ""
+        },
+        {
+          "id": "new_press",
+          "element": "select",
+          "label": "TRANSLATE.NEW_PRESS",
+          "doc": "TRANSLATE.ROW_PRESS_DOC",
+          "value": { "value": "short", "label": "short" },
+          "options": [
+            { "value": "short", "label": "short" },
+            { "value": "long", "label": "long" },
+            { "value": "double", "label": "double" }
+          ]
+        },
+        {
+          "id": "new_command",
+          "element": "input",
+          "type": "text",
+          "label": "TRANSLATE.NEW_COMMAND",
+          "doc": "TRANSLATE.ROW_COMMAND_DOC",
+          "value": ""
+        }
+      ]
     }
   ]
 }
