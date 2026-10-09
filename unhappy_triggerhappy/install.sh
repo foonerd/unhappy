@@ -3,6 +3,10 @@
 
 echo "Installing Unhappy TriggerHappy"
 
+PLUGIN_DIR=/data/plugins/system_controller/unhappy_triggerhappy
+UNIT=/etc/systemd/system/unhappy-listener.service
+SUDOERS=/etc/sudoers.d/volumio-user-unhappy_triggerhappy
+
 fail() {
     echo "ERROR: $1"
     echo "plugininstallend"
@@ -36,20 +40,67 @@ systemctl cat triggerhappy.service >/dev/null 2>&1 || fail "triggerhappy.service
 [ -d /etc/triggerhappy/triggers.d ] || fail "/etc/triggerhappy/triggers.d not found"
 [ -x /usr/local/bin/volumio ] || fail "/usr/local/bin/volumio not found"
 
-# Runtime sudo rules for the volumio user: restart, write, and remove the plugin conf.
-# The image grants these. Report a missing one without failing the install.
-SUDO_LIST=$(sudo -l -U volumio 2>/dev/null)
-for cmd in /bin/systemctl /usr/bin/tee /bin/rm; do
-    case "$SUDO_LIST" in
-        *"$cmd"*)
-            ;;
-        *)
-            echo "WARNING: $cmd is not NOPASSWD for volumio; the plugin cannot run it"
-            ;;
-    esac
-done
+# The listener for this machine. The zip does not keep file modes, and a
+# binary for the wrong machine fails here rather than at the first key.
+chmod +x "$PLUGIN_DIR"/bin/*/unhappy-listener 2>/dev/null || true
+case "$ARCH" in
+    aarch64) BIN_ARCH=armv8 ;;
+    amd64) BIN_ARCH=x64 ;;
+    *) BIN_ARCH=$ARCH ;;
+esac
+LISTENER="$PLUGIN_DIR/bin/$BIN_ARCH/unhappy-listener"
+[ -x "$LISTENER" ] || fail "no listener binary for architecture $ARCH"
+"$LISTENER" --version >/dev/null 2>&1 || fail "the listener binary for $ARCH does not run on this machine"
+echo "Listener: $("$LISTENER" --version)"
 
-# Nothing is copied into /etc. The stock audio.conf is not replaced.
+# Its unit: the volumio user with the input group, started by the plugin
+# when the listener is turned on, never here.
+cat > "$UNIT" <<EOF
+[Unit]
+Description=Unhappy TriggerHappy input listener
+After=local-fs.target
+
+[Service]
+Type=simple
+User=volumio
+Group=volumio
+SupplementaryGroups=input
+ExecStart=$LISTENER
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+
+# Sudo rules: the exact commands the plugin runs, and nothing wider. The
+# file is named volumio-user-* so it is read after /etc/sudoers.d/volumio-user,
+# the convention of the Volumio plugin sources.
+cat > "$SUDOERS" <<'EOF'
+volumio ALL=(ALL) NOPASSWD: /bin/systemctl restart triggerhappy
+volumio ALL=(ALL) NOPASSWD: /bin/systemctl enable --now unhappy-listener.service
+volumio ALL=(ALL) NOPASSWD: /bin/systemctl disable --now unhappy-listener.service
+volumio ALL=(ALL) NOPASSWD: /bin/systemctl start unhappy-listener.service
+volumio ALL=(ALL) NOPASSWD: /bin/systemctl stop unhappy-listener.service
+volumio ALL=(ALL) NOPASSWD: /bin/systemctl restart unhappy-listener.service
+volumio ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart triggerhappy
+volumio ALL=(ALL) NOPASSWD: /usr/bin/systemctl enable --now unhappy-listener.service
+volumio ALL=(ALL) NOPASSWD: /usr/bin/systemctl disable --now unhappy-listener.service
+volumio ALL=(ALL) NOPASSWD: /usr/bin/systemctl start unhappy-listener.service
+volumio ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop unhappy-listener.service
+volumio ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart unhappy-listener.service
+volumio ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/triggerhappy/triggers.d/unhappy_triggerhappy.conf
+volumio ALL=(ALL) NOPASSWD: /bin/rm -f /etc/triggerhappy/triggers.d/unhappy_triggerhappy.conf
+volumio ALL=(ALL) NOPASSWD: /usr/bin/rm -f /etc/triggerhappy/triggers.d/unhappy_triggerhappy.conf
+EOF
+chmod 0440 "$SUDOERS"
+if ! visudo -c -f "$SUDOERS" >/dev/null 2>&1; then
+    rm -f "$SUDOERS"
+    fail "invalid sudoers syntax"
+fi
+
+# Nothing is copied into /etc/triggerhappy. The stock audio.conf is not replaced.
 # The triggers file is written later, by Save in the binding editor.
 # triggerhappy.service is not enabled or disabled here.
 # 99-restart-thd-on-hid.rules is not installed or changed.
