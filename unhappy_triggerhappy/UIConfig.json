@@ -181,6 +181,79 @@
           }
         }
       ]
+    },
+    {
+      "id": "section_listener",
+      "element": "section",
+      "label": "TRANSLATE.LISTENER_SECTION",
+      "icon": "fa-gamepad",
+      "onSave": {
+        "type": "controller",
+        "endpoint": "system_controller/unhappy_triggerhappy",
+        "method": "saveListener"
+      },
+      "saveButton": {
+        "label": "TRANSLATE.SAVE",
+        "data": [
+          "listener_enabled",
+          "long_ms",
+          "double_ms",
+          "debounce_ms"
+        ]
+      },
+      "content": [
+        {
+          "id": "listener_status",
+          "element": "input",
+          "type": "text",
+          "label": "TRANSLATE.LISTENER_STATUS",
+          "doc": "TRANSLATE.LISTENER_STATUS_DOC",
+          "value": ""
+        },
+        {
+          "id": "listener_enabled",
+          "element": "switch",
+          "label": "TRANSLATE.LISTENER_ENABLED",
+          "doc": "TRANSLATE.LISTENER_ENABLED_DOC",
+          "value": false
+        },
+        {
+          "id": "long_ms",
+          "element": "input",
+          "type": "number",
+          "label": "TRANSLATE.LONG_MS",
+          "doc": "TRANSLATE.LONG_MS_DOC",
+          "value": 400,
+          "visibleIf": {
+            "field": "listener_enabled",
+            "value": true
+          }
+        },
+        {
+          "id": "double_ms",
+          "element": "input",
+          "type": "number",
+          "label": "TRANSLATE.DOUBLE_MS",
+          "doc": "TRANSLATE.DOUBLE_MS_DOC",
+          "value": 300,
+          "visibleIf": {
+            "field": "listener_enabled",
+            "value": true
+          }
+        },
+        {
+          "id": "debounce_ms",
+          "element": "input",
+          "type": "number",
+          "label": "TRANSLATE.DEBOUNCE_MS",
+          "doc": "TRANSLATE.DEBOUNCE_MS_DOC",
+          "value": 30,
+          "visibleIf": {
+            "field": "listener_enabled",
+            "value": true
+          }
+        }
+      ]
     }
   ]
 }

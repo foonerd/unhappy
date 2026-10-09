@@ -38,5 +38,25 @@
   "key_previoussong": {
     "type": "string",
     "value": "/usr/local/bin/volumio previous"
+  },
+  "listener_enabled": {
+    "type": "boolean",
+    "value": false
+  },
+  "listener_devices": {
+    "type": "string",
+    "value": "[]"
+  },
+  "long_ms": {
+    "type": "number",
+    "value": 400
+  },
+  "double_ms": {
+    "type": "number",
+    "value": 300
+  },
+  "debounce_ms": {
+    "type": "number",
+    "value": 30
   }
 }
