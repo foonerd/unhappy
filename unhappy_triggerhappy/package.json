@@ -1,6 +1,6 @@
 {
   "name": "unhappy_triggerhappy",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Restarts triggerhappy after Volumio is ready, and writes a separate triggers map",
   "main": "index.js",
   "scripts": {
@@ -16,7 +16,7 @@
       "bookworm"
     ],
     "details": "Restarts triggerhappy once Volumio reports ready, or immediately. The binding editor writes this plugin's own triggers file and does not replace the stock audio.conf.",
-    "changelog": "1.0.1: Save writes only bindings that differ from other triggers.d confs, turning the editor off removes the plugin conf, install checks triggerhappy dependencies.",
+    "changelog": "1.1.0: A listener of the plugin's own for the remotes you take over: short, long, and double presses with debounce, the remote grabbed exclusively, triggerhappy keeping everything else.",
     "architectures": [
       "amd64",
       "armhf"
