@@ -29,9 +29,34 @@ flowchart LR
 The plugin covers two triggerhappy gaps the OS tree is not changing.
 
 1. On the Volumio 4 installs where each triggerhappy command runs twice per press, restarting `triggerhappy` after Volumio has finished loading makes the next presses run once, until the next time the service starts. This plugin does that restart. It does not change volumio-os.
-2. A binding editor can rewrite this plugin's own triggers file. The stock baseline is the hanger `audio.conf` command list, through `/usr/local/bin/volumio`.
+2. A binding editor can write this plugin's own triggers file. The stock baseline is the hanger `audio.conf` command list, through `/usr/local/bin/volumio`. The plugin file is differences only. It must not become a second copy of the stock map.
 
 The plugin does not decide why one `thd` process runs a command twice. It restarts the service the same way the udev rule and the forum reports already restart it.
+
+## Binding write (differences only)
+
+Triggerhappy loads every `*.conf` in `triggers.d`. Writing the stock map into `unhappy_triggerhappy.conf` while `audio.conf` still has the same keys runs both. The same `KEY_PLAYPAUSE` line in both files fires twice.
+
+```mermaid
+flowchart TD
+  SAVE["Save bindings"] --> MORE{"Make me more happy on?"}
+  MORE -->|no| RM["rm unhappy_triggerhappy.conf"]
+  MORE -->|yes| READ["read other *.conf in triggers.d"]
+  READ --> DIFF["keep key + event 1 + command only if not already present"]
+  DIFF --> ANY{"any unique lines?"}
+  ANY -->|no| RM
+  ANY -->|yes| WRITE["tee unhappy_triggerhappy.conf"]
+  RM --> RESTART["systemctl restart triggerhappy"]
+  WRITE --> RESTART
+```
+
+Rules:
+
+- Before Save, read live `*.conf` files in `/etc/triggerhappy/triggers.d/` that this plugin did not write. Do not invent a second stock copy.
+- A line is a duplicate when `KEY`, event value `1`, and the normalized command already appear in those foreign files. Identical stock lines must not appear in `unhappy_triggerhappy.conf`.
+- A Save that would write only duplicates writes nothing and removes `unhappy_triggerhappy.conf` if it exists.
+- Turning **Make me more happy** off removes the plugin conf and restarts once.
+- Forever and Now never write the plugin conf.
 
 ## What the plugin does not do
 
@@ -72,19 +97,19 @@ flowchart TD
   FLAG -->|"next onStart, including boot"| POLL["60-pass VOLUMIO_SYSTEM_STATUS poll"]
   POLL -->|"first ready, or loop exhausted"| RESTART
   MORE["Make me more happy"] -->|"switch shows the eight fields"| EDITOR["binding editor"]
-  EDITOR -->|"Save, no poll"| WRITE["tee unhappy_triggerhappy.conf"]
+  EDITOR -->|"Save, differences only, no poll"| WRITE["tee or rm unhappy_triggerhappy.conf"]
   WRITE --> RESTART
 ```
 
-**Make me happy now.** Button. Runs `/usr/bin/sudo /bin/systemctl restart triggerhappy` once. No poll. The unit in volumio-os is `triggerhappy.service` (`ExecStart=/usr/sbin/thd --triggers /etc/triggerhappy/triggers.d/ ...`). The udev rule restarts it as `triggerhappy`. `systemctl` is already NOPASSWD for the `volumio` user.
+**Make me happy now.** Button. Runs `/usr/bin/sudo /bin/systemctl restart triggerhappy` once. No poll. Does not write or remove the plugin conf. The unit in volumio-os is `triggerhappy.service` (`ExecStart=/usr/sbin/thd --triggers /etc/triggerhappy/triggers.d/ ...`). The udev rule restarts it as `triggerhappy`. `systemctl` is already NOPASSWD for the `volumio` user.
 
-**Make me happy forever.** Switch. Saving the switch only stores the flag. It does not poll and does not restart. Turning it off cancels a poll that this process already started. The poll runs from `onStart` when the flag is true. Volumio calls `onStart` when the enabled plugin starts, including at boot. That is the boot path. There is no second unit.
+**Make me happy forever.** Switch. Saving the switch only stores the flag. It does not poll, does not restart, and does not write the plugin conf. Turning it off cancels a poll that this process already started. The poll runs from `onStart` when the flag is true. Volumio calls `onStart` when the enabled plugin starts, including at boot. That is the boot path. There is no second unit.
 
-**Make me more happy.** Switch on the binding section. Turning it on shows the eight command fields (`visibleIf`). Save writes `/etc/triggerhappy/triggers.d/unhappy_triggerhappy.conf` and restarts `triggerhappy` immediately. No poll.
+**Make me more happy.** Switch on the binding section. Turning it on shows the eight command fields (`visibleIf`). Save compares the UI map to foreign `*.conf` files, writes only differing lines to `/etc/triggerhappy/triggers.d/unhappy_triggerhappy.conf`, or removes that file when there are no differences or when the switch is off, then restarts `triggerhappy` immediately. No poll.
 
 The event value written for every line is `1`, matching hanger `audio.conf`. The editor does not change the key name or the event value. Clearing a command omits that line from the plugin file. A command that contains a newline is rejected and nothing is restarted.
 
-`/usr/bin/tee` is already NOPASSWD, so Save does not add a sudoers file. `audio.conf` is still loaded from the same triggers directory. The same key in both files runs both commands. Saving the stock map on top of an untouched `audio.conf` double-fires those keys even after a restart. The plugin file is for a map that is not already the stock file. Uninstall deletes only the plugin file.
+`/usr/bin/tee` and `/bin/rm` are already NOPASSWD, so Save does not add a sudoers file. Uninstall deletes only the plugin file.
 
 ## Install and uninstall
 

@@ -8,7 +8,7 @@
   "HAPPY_FOREVER_DOC": "On the next plugin start, including boot, poll VOLUMIO_SYSTEM_STATUS up to 60 times and restart triggerhappy on the first ready pass. If the loop ends without ready, restart anyway. Saving this switch does not restart and does not poll.",
   "MORE_SECTION": "Make me more happy",
   "HAPPY_MORE": "Make me more happy",
-  "HAPPY_MORE_DOC": "Open the binding editor. Save writes this plugin's triggers file and restarts triggerhappy immediately.",
+  "HAPPY_MORE_DOC": "Open the binding editor. Save writes only lines that differ from other triggers.d confs, or removes this plugin's file when there are none. Turning this off removes the file. Restarts triggerhappy immediately.",
   "KEY_MUTE": "KEY_MUTE",
   "KEY_VOLUMEUP": "KEY_VOLUMEUP",
   "KEY_VOLUMEDOWN": "KEY_VOLUMEDOWN",

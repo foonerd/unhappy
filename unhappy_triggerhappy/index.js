@@ -2,6 +2,7 @@
 
 var libQ = require('kew');
 var fs = require('fs-extra');
+var path = require('path');
 var spawn = require('child_process').spawn;
 var exec = require('child_process').exec;
 
@@ -139,8 +140,14 @@ UnhappyTriggerHappy.prototype.saveBindings = function (data) {
     });
 
     control.saveBindings({
+        readForeignTriggers: function () {
+            return self._readForeignTriggers();
+        },
         writeTriggers: function (body) {
             return self._writeTriggers(body);
+        },
+        removeTriggers: function () {
+            return self._removeTriggers();
         },
         restartTriggerhappy: function () {
             return self._restartTriggerhappy();
@@ -176,6 +183,37 @@ UnhappyTriggerHappy.prototype._restartTriggerhappy = function () {
     });
 };
 
+UnhappyTriggerHappy.prototype._readForeignTriggers = function () {
+    var self = this;
+    var texts = [];
+
+    try {
+        if (!fs.existsSync(stockMap.TRIGGERS_DIR)) {
+            return texts;
+        }
+        var names = fs.readdirSync(stockMap.TRIGGERS_DIR);
+        var i;
+        for (i = 0; i < names.length; i++) {
+            var name = names[i];
+            if (!name || name === stockMap.TRIGGERS_BASENAME) {
+                continue;
+            }
+            if (name.slice(-5) !== '.conf') {
+                continue;
+            }
+            try {
+                texts.push(fs.readFileSync(path.join(stockMap.TRIGGERS_DIR, name), 'utf8'));
+            } catch (err) {
+                self.logger.warn(LOG_PREFIX + 'skip unreadable ' + name + ': ' + err.message);
+            }
+        }
+    } catch (err) {
+        self.logger.warn(LOG_PREFIX + 'read foreign triggers failed: ' + err.message);
+    }
+
+    return texts;
+};
+
 UnhappyTriggerHappy.prototype._writeTriggers = function (body) {
     var self = this;
 
@@ -201,6 +239,23 @@ UnhappyTriggerHappy.prototype._writeTriggers = function (body) {
             }
         });
         child.stdin.end(body);
+    });
+};
+
+UnhappyTriggerHappy.prototype._removeTriggers = function () {
+    var self = this;
+
+    return new Promise(function (resolve, reject) {
+        exec('/usr/bin/sudo /bin/rm -f ' + stockMap.TRIGGERS_FILE, { uid: 1000, gid: 1000 }, function (error, stdout, stderr) {
+            if (error) {
+                self.logger.error(LOG_PREFIX + 'remove ' + stockMap.TRIGGERS_FILE + ' failed: ' +
+                    (stderr || error.message));
+                reject(error);
+                return;
+            }
+            self.logger.info(LOG_PREFIX + 'removed ' + stockMap.TRIGGERS_FILE);
+            resolve();
+        });
     });
 };
 
