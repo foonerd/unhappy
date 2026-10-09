@@ -26,7 +26,7 @@ flowchart LR
   CTRL --> LOOP
   CTRL --> MAP
   IDX --> LST
-  SRC -. ship.sh .-> BIN
+  SRC -.->|"ship.sh"| BIN
 ```
 
 ## What it covers
