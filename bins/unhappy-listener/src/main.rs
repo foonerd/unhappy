@@ -82,6 +82,8 @@ struct Daemon {
     config_path: PathBuf,
     config: Config,
     config_error: Option<String>,
+    /// The bindings the last read left out, and why.
+    config_warnings: Vec<String>,
     config_seen: Option<SystemTime>,
     engine: Engine,
     opens: Vec<Open>,
@@ -101,7 +103,8 @@ impl Daemon {
             .and_then(|m| m.modified())
             .ok();
         match Config::load(&self.config_path) {
-            Ok(config) => {
+            Ok(loaded) => {
+                let config = loaded.config;
                 log(&format!(
                     "configuration: {} device(s), {} binding(s), long {} ms, double {} ms, debounce {} ms",
                     config.devices.len(),
@@ -110,9 +113,13 @@ impl Daemon {
                     config.timing.double_ms,
                     config.timing.debounce_ms
                 ));
+                for warning in &loaded.warnings {
+                    log(&format!("binding left out: {warning}"));
+                }
                 self.engine = Engine::new(config.timing, &config.bindings);
                 self.config = config;
                 self.config_error = None;
+                self.config_warnings = loaded.warnings;
             }
             Err(e) => {
                 log(&format!("configuration not applied: {e}"));
@@ -228,6 +235,7 @@ impl Daemon {
             "version": VERSION,
             "config": self.config_path.to_string_lossy(),
             "config_error": self.config_error,
+            "warnings": self.config_warnings,
             "devices": self.opens.iter().filter(|o| o.taken).map(Open::json).collect::<Vec<_>>(),
             "wanted": self.config.devices.len(),
             "bindings": self.config.bindings.len(),
@@ -261,7 +269,7 @@ impl Daemon {
             Request::Reload => {
                 self.load_config();
                 let body = match &self.config_error {
-                    None => serde_json::json!({"ok": true}),
+                    None => serde_json::json!({"ok": true, "warnings": self.config_warnings}),
                     Some(e) => serde_json::json!({"ok": false, "error": e}),
                 };
                 control::respond(client, &body);
@@ -452,6 +460,7 @@ fn main() {
         config_path: args.config,
         config: Config::default(),
         config_error: None,
+        config_warnings: Vec::new(),
         config_seen: None,
         engine: Engine::new(config::Timing::default(), &[]),
         opens: Vec::new(),

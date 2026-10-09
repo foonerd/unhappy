@@ -1,6 +1,11 @@
 //! The listener's configuration: which devices to take over, the press
 //! timing, and the bindings. The plugin writes it as JSON; the daemon reads
 //! it at start and again whenever the file changes.
+//!
+//! A binding that does not hold up (a key name the kernel does not know, a
+//! blank or multi-line command) is dropped with a warning and the rest run:
+//! one typo must not leave a remote dead after a reboot. Timing outside its
+//! range refuses the file, since the plugin never writes that.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -106,21 +111,24 @@ pub struct Config {
     pub bindings: Vec<Binding>,
 }
 
+/// A configuration read, with the bindings it had to leave out.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Loaded {
+    pub config: Config,
+    pub warnings: Vec<String>,
+}
+
 impl Config {
-    pub fn load(path: &Path) -> Result<Config, String> {
+    pub fn load(path: &Path) -> Result<Loaded, String> {
         let text = std::fs::read_to_string(path)
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         Self::parse(&text)
     }
 
-    pub fn parse(text: &str) -> Result<Config, String> {
-        let config: Config = serde_json::from_str(text).map_err(|e| format!("bad JSON: {e}"))?;
-        config.validate()?;
-        Ok(config)
-    }
-
-    fn validate(&self) -> Result<(), String> {
-        let t = self.timing;
+    pub fn parse(text: &str) -> Result<Loaded, String> {
+        let mut config: Config =
+            serde_json::from_str(text).map_err(|e| format!("bad JSON: {e}"))?;
+        let t = config.timing;
         if !(100..=5000).contains(&t.long_ms) {
             return Err(format!("long_ms {} is outside 100..=5000", t.long_ms));
         }
@@ -130,26 +138,34 @@ impl Config {
         if t.debounce_ms > 500 {
             return Err(format!("debounce_ms {} is above 500", t.debounce_ms));
         }
-        for d in &self.devices {
+        for d in &config.devices {
             if d.name.trim().is_empty() {
                 return Err("a device entry has no name".to_string());
             }
         }
-        for b in &self.bindings {
-            if evdev::KeyCode::from_str(&b.key).is_err() {
-                return Err(format!("unknown key name {}", b.key));
+        let mut warnings = Vec::new();
+        config.bindings.retain(|b| match Self::fault(b) {
+            None => true,
+            Some(why) => {
+                warnings.push(why);
+                false
             }
-            if b.command.trim().is_empty() {
-                return Err(format!("binding {} {} has no command", b.key, b.press));
-            }
-            if b.command.contains('\n') || b.command.contains('\r') {
-                return Err(format!(
-                    "binding {} {} spans more than one line",
-                    b.key, b.press
-                ));
-            }
+        });
+        Ok(Loaded { config, warnings })
+    }
+
+    /// Why a binding cannot run, if it cannot.
+    fn fault(b: &Binding) -> Option<String> {
+        if evdev::KeyCode::from_str(&b.key).is_err() {
+            return Some(format!("unknown key name {}", b.key));
         }
-        Ok(())
+        if b.command.trim().is_empty() {
+            return Some(format!("{} {} has no command", b.key, b.press));
+        }
+        if b.command.contains('\n') || b.command.contains('\r') {
+            return Some(format!("{} {} spans more than one line", b.key, b.press));
+        }
+        None
     }
 }
 
@@ -159,7 +175,7 @@ mod tests {
 
     #[test]
     fn parses_a_full_config() {
-        let c = Config::parse(
+        let loaded = Config::parse(
             r#"{
               "devices": [{"name": "2.4G Composite Devic"}],
               "timing": {"long_ms": 500, "double_ms": 250, "debounce_ms": 20},
@@ -171,6 +187,8 @@ mod tests {
             }"#,
         )
         .unwrap();
+        let c = loaded.config;
+        assert!(loaded.warnings.is_empty());
         assert_eq!(c.devices.len(), 1);
         assert_eq!(c.timing.long_ms, 500);
         assert_eq!(c.bindings[1].press, Press::Long);
@@ -179,29 +197,42 @@ mod tests {
 
     #[test]
     fn defaults_fill_an_empty_config() {
-        let c = Config::parse("{}").unwrap();
+        let c = Config::parse("{}").unwrap().config;
         assert!(c.devices.is_empty());
         assert_eq!(c.timing, Timing::default());
         assert!(c.bindings.is_empty());
     }
 
     #[test]
-    fn refuses_unknown_keys_and_multiline_commands() {
-        let bad_key = r#"{"bindings": [{"key": "KEY_NOPE", "command": "x"}]}"#;
-        assert!(Config::parse(bad_key).unwrap_err().contains("KEY_NOPE"));
-        let two_lines = r#"{"bindings": [{"key": "KEY_PLAY", "command": "a\nb"}]}"#;
-        assert!(Config::parse(two_lines)
-            .unwrap_err()
-            .contains("more than one line"));
-        let empty = r#"{"bindings": [{"key": "KEY_PLAY", "command": "  "}]}"#;
-        assert!(Config::parse(empty).unwrap_err().contains("no command"));
+    fn drops_bindings_that_cannot_run_and_keeps_the_rest() {
+        let loaded = Config::parse(
+            r#"{"bindings": [
+              {"key": "KEY_NOPE", "command": "x"},
+              {"key": "KEY_PLAY", "command": "a\nb"},
+              {"key": "KEY_STOP", "command": "  "},
+              {"key": "KEY_NEXTSONG", "command": "/usr/local/bin/volumio next"}
+            ]}"#,
+        )
+        .unwrap();
+        assert_eq!(loaded.config.bindings.len(), 1);
+        assert_eq!(loaded.config.bindings[0].key, "KEY_NEXTSONG");
+        assert_eq!(
+            loaded.warnings,
+            vec![
+                "unknown key name KEY_NOPE".to_string(),
+                "KEY_PLAY short spans more than one line".to_string(),
+                "KEY_STOP short has no command".to_string(),
+            ]
+        );
     }
 
     #[test]
-    fn refuses_timing_out_of_range() {
+    fn refuses_timing_out_of_range_and_a_nameless_device() {
         assert!(Config::parse(r#"{"timing": {"long_ms": 10}}"#).is_err());
         assert!(Config::parse(r#"{"timing": {"double_ms": 9000}}"#).is_err());
         assert!(Config::parse(r#"{"timing": {"debounce_ms": 900}}"#).is_err());
+        assert!(Config::parse(r#"{"devices": [{"name": " "}]}"#).is_err());
+        assert!(Config::parse("nonsense").is_err());
     }
 
     #[test]
