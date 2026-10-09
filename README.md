@@ -116,11 +116,16 @@ The event value written for every line is `1`, matching hanger `audio.conf`. The
 ```mermaid
 flowchart LR
   INSTALL["install.sh"] -->|"read VOLUMIO_ARCH"| ARCH{"arm, armv7, armv8, aarch64, x64, amd64"}
-  ARCH -->|yes| ENDI["plugininstallend, copy nothing"]
   ARCH -->|no| FAIL["plugininstallend, exit 1"]
+  ARCH -->|yes| DEPS{"triggerhappy, thd, unit, triggers.d, volumio CLI"}
+  DEPS -->|missing| FAIL
+  DEPS -->|present| SUDO["sudo -l -U volumio, warn if systemctl, tee, rm missing"]
+  SUDO --> ENDI["plugininstallend, copy nothing"]
   UNINSTALL["uninstall.sh"] --> RM["rm -f unhappy_triggerhappy.conf"]
   RM --> ENDU["pluginuninstallend"]
 ```
+
+Volumio runs `install.sh` as root through `sudo sh`, so the script is POSIX sh and uses no bash syntax.
 
 `install.sh` reads `VOLUMIO_ARCH` from `/etc/os-release` the way Audio Keepalive does:
 
@@ -128,7 +133,20 @@ flowchart LR
 ARCH=$(cat /etc/os-release | grep ^VOLUMIO_ARCH | tr -d 'VOLUMIO_ARCH="')
 ```
 
-Empty arch fails. Accepted values are `arm`, `armv7`, `armv8`, `aarch64`, `x64`, and `amd64`. Anything else fails. Both failures print `plugininstallend` and exit 1, which is how that install script reports an unsupported arch. Success prints `plugininstallend` and copies nothing.
+Empty arch fails. Accepted values are `arm`, `armv7`, `armv8`, `aarch64`, `x64`, and `amd64`. Anything else fails. Every failure prints `plugininstallend` and exits 1, which is how that install script reports an unsupported arch. Success prints `plugininstallend` and copies nothing.
+
+### Dependencies
+
+Everything the plugin needs is already part of a Volumio 4 image. `install.sh` checks each hard dependency and fails when one is missing. It does not run `apt`.
+
+| Dependency | Used for | Provided by | Check |
+| --- | --- | --- | --- |
+| `triggerhappy` package, `/usr/sbin/thd` | the daemon that is restarted | Volumio base package list | `dpkg-query` status and `-x` |
+| `triggerhappy.service` | `systemctl restart triggerhappy` | `volumio-os` unit file | `systemctl cat` |
+| `/etc/triggerhappy/triggers.d/` with `audio.conf` | foreign conf reads, the plugin conf | package directory, `audio.conf` from `volumio-os` | `-d` |
+| `/usr/local/bin/volumio` | every binding command | `volumio-os` symlink to the backend CLI | `-x` |
+| NOPASSWD `/bin/systemctl`, `/usr/bin/tee`, `/bin/rm` for `volumio` | restart, write, remove | `volumio-os` sudoers | `sudo -l -U volumio`, warning only |
+| `kew`, `fs-extra`, `v-conf` | plugin runtime | the Volumio plugin installer | not checked |
 
 `package.json` lists store architectures `amd64` and `armhf`. Those are the dpkg architectures `pluginhelper.js` accepts. `VOLUMIO_ARCH` is a different string (`arm` / `armv7` map to the armhf payload family; `x64` / `amd64` map to amd64). This plugin has no per-arch binaries, so the check only accepts or refuses. It does not look for a `bin/$ARCH` directory.
 
