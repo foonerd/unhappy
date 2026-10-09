@@ -2,6 +2,12 @@
 
 All notable changes to Unhappy TriggerHappy are recorded here. The format follows Keep a Changelog; versions follow Semantic Versioning.
 
+## [1.2.0] - unreleased
+
+- **Bindings of your own for a remote taken over.** A bindings section lists every binding as a row of key, press, and command with a remove switch, and a new-binding row at the end. Each key may carry a short, a long, and a double binding. A remote with no list of its own keeps running the editor's eight commands as short presses.
+- **Capture a key.** A button asks the listener for the next key pressed on any remote and puts its name into the new binding's key field; the page refreshes itself. While the listener waits, presses run no commands.
+- A binding the listener cannot run (a key name the kernel does not know) is left out with a warning shown on save and in the status line; the rest of the list runs, so one typo never leaves a remote dead after a reboot.
+
 ## [1.1.0] - 2026-10-09
 
 - **A listener of the plugin's own for the remotes you take over.** `unhappy-listener`, a small daemon in the plugin's zip for every Volumio architecture, grabs the input devices named in its configuration and runs a command on a short, long, or double press of a key, with the kernel's timestamps and a debounce window. Triggerhappy keeps every device that is not taken over.

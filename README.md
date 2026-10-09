@@ -64,7 +64,7 @@ Rules:
 - A Save that would write only duplicates writes nothing and removes `unhappy_triggerhappy.conf` if it exists.
 - Turning **Make me more happy** off removes the plugin conf and restarts once.
 - Forever and Now never write the plugin conf.
-- The same Save rewrites the listener's file when the listener is on: one map, two executors.
+- The same Save rewrites the listener's file when the listener is on and the remote has no list of its own: until a bindings list is saved, a remote taken over runs the editor's eight commands as short presses.
 
 ## What the plugin does not do
 
@@ -123,7 +123,11 @@ The event value written for every line is `1`, matching hanger `audio.conf`. The
 
 `/usr/bin/tee` and `/bin/rm -f` on the plugin's file are lines of the plugin's sudoers file. Uninstall deletes only the plugin file.
 
-**Make me really happy.** Switch on the listener section, with the three timings and one **Take over** switch per remote. A remote is every input node of one name: a USB receiver that presents a keyboard and a consumer-control node is one remote. The list shows the key devices present, without touchscreens, and any remote taken over earlier that is not connected now. Save writes `listener.json`, and starts or stops the listener. The status line names what the listener holds.
+**Make me really happy.** Switch on the listener section, with the three timings and one **Take over** switch per remote. A remote is every input node of one name: a USB receiver that presents a keyboard and a consumer-control node is one remote. The list shows the key devices present, without touchscreens, and any remote taken over earlier that is not connected now. Save writes `listener.json`, and starts or stops the listener. The status line names what the listener holds. A remote is released by turning its switch off and saving.
+
+**Make me really happy: bindings.** The list a remote taken over runs. Each binding is a row of key, press (`short`, `long`, `double`), command, and a **remove** switch; the last row is the new binding, its key filled by **Capture a key**. Save applies every edit, drops the rows marked remove, adds the new row when it names a key, and writes `listener.json`. A key may carry one binding of each press. A row that does not hold up, an unknown key name, a press that is not one of the three, a blank or multi-line command, or a key and press bound twice, refuses the whole save and says which row. Until a list is saved, the rows shown are the editor's eight commands as short presses, and the editor's Save keeps them in step.
+
+**Capture a key.** Button on the bindings section. The listener must be on. It reports the next key pressed on any remote within ten seconds, taken over or not, puts the name into the new binding's key field, and refreshes the page. While it waits, presses run no commands.
 
 ## The listener
 
@@ -161,7 +165,9 @@ Defaults: long 400 ms, double gap 300 ms, debounce 30 ms. The listener refuses a
 }
 ```
 
-A device is matched by name; `phys` and `uniq`, when not empty, must match too. Key names are the kernel's (`KEY_PLAYPAUSE`, `KEY_VOLUMEUP`, and so on); an unknown name or an empty or multi-line command refuses the whole file. The daemon looks at the file once a second and reloads when it changed. Devices named but absent are picked up when they appear; a device that goes away is dropped and looked for again.
+A device is matched by name; `phys` and `uniq`, when not empty, must match too. Key names are the kernel's (`KEY_PLAYPAUSE`, `KEY_VOLUMEUP`, and so on). A binding with a name the kernel does not know, or with an empty or multi-line command, is left out with a warning and the rest run; the warnings are in `status` and in the answer to `reload`, and the plugin shows them when it saves. Timing outside its range refuses the whole file, and the daemon keeps the configuration it had. The daemon looks at the file once a second and reloads when it changed. Devices named but absent are picked up when they appear; a device that goes away is dropped and looked for again.
+
+The plugin keeps the bindings in its own config as `listener_bindings` and writes them to this file; an empty list means the editor's eight commands as short presses.
 
 **Commands** run as the volumio user through `/bin/sh -c`, detached; the daemon neither waits for them nor reads their output. Each run is logged with its key and press.
 
@@ -169,9 +175,9 @@ A device is matched by name; `phys` and `uniq`, when not empty, must match too. 
 
 | Request | Answer |
 | --- | --- |
-| `{"cmd":"status"}` | `ok`, `version`, `config`, `config_error`, the `devices` held, `wanted`, `bindings`, `timing`, `capturing` |
+| `{"cmd":"status"}` | `ok`, `version`, `config`, `config_error`, `warnings`, the `devices` held, `wanted`, `bindings`, `timing`, `capturing` |
 | `{"cmd":"list"}` | every input device with keys: `name`, `phys`, `uniq`, `path`, `keys`, `touch`, `taken` |
-| `{"cmd":"reload"}` | the configuration read again: `ok`, or `error` |
+| `{"cmd":"reload"}` | the configuration read again: `ok` with `warnings`, or `error` |
 | `{"cmd":"capture","timeout_ms":10000}` | the next key pressed on any device: `key` and `device`, or `error: timeout`. While a capture waits, presses run no commands |
 
 **Unit.** `unhappy-listener.service`, written by `install.sh` with the binary for the machine's architecture, run as `volumio` with the `input` group as a supplementary group, restarted on failure. The plugin enables and starts it when the listener is on, and disables and stops it when the listener is off or the plugin is stopped. Its log is the journal: `journalctl -u unhappy-listener`.
